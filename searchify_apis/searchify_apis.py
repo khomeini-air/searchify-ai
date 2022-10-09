@@ -69,7 +69,7 @@ class suggestions(BaseModel):
 
 #Build post function that will recive the data(domain,tags) and return the suggestions result
 @app.post('/recommendations')
-async def recommendatio(item:suggestions):
+async def recommendations(item:suggestions):
     #authorization to connect with neo4j graph database
     graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
 
@@ -115,4 +115,244 @@ async def recommendatio(item:suggestions):
         for sug in result_pd['sug']:
             result_fi['suggestion '+str(x)]=sug
             x+=1
+    return result_fi
+
+
+############################## ADMIN APIS #####################################
+
+#use case 1
+######################### CRUD for domain #########################
+#api for create new domain
+class new_domain(BaseModel):
+    domain:str
+    visability:bool
+
+@app.post('/admin_create_domain')
+async def create_domain(item:new_domain):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    domain_name = item.domain
+    domain_visability = item.visability
+    #build quary body that return all domains
+    quary = '''MERGE (n:Domain {name: "'''+domain_name+'''",visibility:"'''+str(domain_visability)+'''"}) RETURN n.name'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the domain names from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case domain not added sucessfuly return the crate domain process failed
+    if result_pd.empty:
+        result_fi = {'domains':'create domain process failed'}
+    else:
+        result_fi = {'domains':list(result_pd['n.name'])[0]+' domain added sucessfully'}
+
+    return result_fi
+
+
+#api for read required domain
+class read_domain(BaseModel):
+    domain:str
+    
+
+@app.post('/admin_read_domain')
+async def read_domain_fun(item:read_domain):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    domain_name = item.domain
+   
+    #build quary body that read the required domain
+    quary = '''MATCH (n:Domain {name: "'''+domain_name+'''"}) RETURN n'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the domain data from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case domain not read sucessfuly return the read domain process failed
+    if result_pd.empty:
+        result_fi = {'domain':'read domain process failed'}
+    else:
+        result_fi = {'domain':result_pd['n']}
+
+    return result_fi
+
+#api for udate required domain
+class update_domain(BaseModel):
+    domain_old_name:str
+    domain_new_name:str
+    domain_visability:bool
+
+@app.post('/admin_update_domain')
+async def update_domain_fun(item:update_domain):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    domain_name = item.domain_old_name
+    domain_new_name = item.domain_new_name
+    domain_visability = item.domain_visability
+   
+
+    #build quary body that update the domain properties
+    quary = '''MATCH (n:Domain {name: "'''+domain_name+'''"}) SET n.name = "'''+domain_new_name+'''" , n.visability ='''+str(domain_visability)+''' RETURN n.name'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the domain names from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case domain not added sucessfuly return the crate domain process failed
+    if result_pd.empty:
+        result_fi = {'domain':'update domain process failed'}
+    else:
+        result_fi = {list(result_pd['n.name'])[0]+' domain updated sucessfully'}
+
+    return result_fi
+
+#api for delete required domain
+class delete_domain(BaseModel):
+    domain:str
+
+@app.post('/admin_delete_domain')
+async def delete_domain_fun(item:delete_domain):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    domain_name = item.domain
+
+    #build quary body that return all domains
+    quary = '''MATCH (n:Domain {name: "'''+domain_name+'''"}) DELETE n'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the domain names from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case domain not added sucessfuly return the crate domain process failed
+    if result_pd.empty:
+        result_fi = {'domains':'Required domain deleted sucessfully'}
+    else:
+        result_fi = {'domains':'delete domain process failed'}
+
+    return result_fi
+
+
+######################### CRUD for Tags #########################
+#api for create new tag
+class new_tag(BaseModel):
+    tag:str
+    domain:str
+
+
+@app.post('/admin_create_tag')
+async def create_tag_fun(item:new_tag):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    tag_name = item.tag
+    domain_name = item.domain
+    #build quary body that return required tag
+    tag_merging_quary = '''MERGE (tag:Tag {name: "'''+tag_name+'''"})'''
+    relation_wdomain_quary = '''MATCH (t:Tag {name: "'''+tag_name+'''"}) MATCH (d:Domain {name: "'''+domain_name+'''"}) MERGE (t)- [:IS_LINKED_WITH] ->(d) RETURN t.name,d.name'''
+    graph.run(tag_merging_quary)
+    relation_result = graph.run(relation_wdomain_quary)
+
+    #converting the tabled result to dataframe to extract the tag name from it
+    result_pd = pd.DataFrame(relation_result.to_data_frame())
+
+    #make condition in case tag not added sucessfuly return the create tag process failed
+    if result_pd.empty:
+        result_fi = {'tag':'create tag process failed'}
+    else:
+        result_fi = {'tags':list(result_pd['t.name'])[0]+' tag added sucessfully and attach to '+list(result_pd['d.name'])[0]+' domain sucessfully'}
+
+    return result_fi
+
+
+#api for read required tag
+class read_tag(BaseModel):
+    tag:str
+    
+
+@app.post('/admin_read_tag')
+async def read_tag_fun(item:read_tag):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    tag_name = item.tag
+   
+    #build quary body that read the required tag
+    quary = '''MATCH (t:Tag {name: "'''+tag_name+'''"}) <-[:IS_LINKED_WITH]-> (d:Domain) RETURN t,d'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the tag data from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case tag not read sucessfuly return the read tag process failed
+    if result_pd.empty:
+        result_fi = {'tag':'read tag process failed'}
+    else:
+        result_fi = {'tag':result_pd['t'],'domain':result_pd['d']}
+
+    return result_fi
+
+#api for udate required tag
+class update_tag(BaseModel):
+    tag_old_name:str
+    tag_new_name:str
+    old_related_domain:str
+    new_related_domain:str
+
+@app.post('/admin_update_tag')
+async def update_tag_fun(item:update_tag):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    tag_old_name = item.tag_old_name
+    tag_new_name = item.tag_new_name
+    old_related_domain = item.old_related_domain
+    new_related_domain = item.new_related_domain
+   
+    #build quary body that update the tag properties and it's relation
+    quary = '''MATCH (n:Tag {name: "'''+tag_old_name+'''"}) SET n.name = "'''+tag_new_name+'''" '''
+    erase_old_relation_quary = '''MATCH (t:Tag {name: "'''+tag_new_name+'''"}) - [r:IS_LINKED_WITH] -> (d:Domain {name: "'''+old_related_domain+'''"}) DELETE r'''
+    relation_wdomain_quary = '''MATCH (t:Tag {name: "'''+tag_new_name+'''"}) MATCH (d:Domain {name: "'''+new_related_domain+'''"}) MERGE (t)- [:IS_LINKED_WITH] ->(d) RETURN t.name,d.name'''
+    
+    graph.run(quary)
+    graph.run(erase_old_relation_quary)
+    result = graph.run(relation_wdomain_quary)
+
+    #converting the tabled result to dataframe to extract the tag name from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case tag not updated sucessfuly return the update tag process failed
+    if result_pd.empty:
+        result_fi = {'tag':'update tag process failed'}
+    else:
+        result_fi = {'tags':list(result_pd['t.name'])[0]+' tag updated sucessfully and attach to '+list(result_pd['d.name'])[0]+' domain sucessfully'}
+
+    return result_fi
+
+#api for delete required domain
+class delete_tag(BaseModel):
+    tag:str
+
+@app.post('/admin_delete_tag')
+async def delete_tag_fun(item:delete_tag):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    tag_name = item.tag
+
+    #build quary body detach and delete the required tag
+    quary = '''MATCH (n:Tag {name: "'''+tag_name+'''"}) DETACH DELETE n'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the tag name from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case tag not deleted sucessfuly return the delete tag process failed (result must be empty)
+    if result_pd.empty:
+        result_fi = {'tags':'Required tag deleted sucessfully'}
+    else:
+        result_fi = {'tags':'delete tag process failed'}
+
     return result_fi
