@@ -1,3 +1,4 @@
+from re import L
 from tokenize import String
 from py2neo import Graph
 from fastapi import FastAPI
@@ -355,4 +356,194 @@ async def delete_tag_fun(item:delete_tag):
     else:
         result_fi = {'tags':'delete tag process failed'}
 
+    return result_fi
+
+
+######################### CRUD for Recommendations #########################
+#api for create new suggestion
+class new_rec(BaseModel):
+    rec:str
+    rec_dis:str
+    rec_key:str
+    rec_title:str
+    domain:str
+    tag:list[constr(max_length=255)]
+
+@app.post('/admin_create_rec')
+async def create_rec_fun(item:new_rec):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    rec_name = item.rec
+    rec_dis = item.rec_dis
+    rec_key = item.rec_key
+    rec_title = item.rec_title
+    domain_name = item.domain
+    tag_names = item.tag
+    
+    #build quary body that return required recommendation
+    rec_merging_quary = '''MERGE (s:Suggestion {name: "'''+rec_name+'''",description:"'''+rec_dis+'''",keyword:"'''+rec_key+'''",title:"'''+rec_title+'''"})'''
+    relation_wdomain_quary = '''MATCH (s:Suggestion {name: "'''+rec_name+'''"}) MATCH (d:Domain {name: "'''+domain_name+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(d) RETURN s.name,d.name'''
+    graph.run(rec_merging_quary)
+    relation_result = graph.run(relation_wdomain_quary)
+    for tag_name in tag_names:
+        relation_wtag_quary = '''MATCH (s:Suggestion {name: "'''+rec_name+'''"}) MATCH (t:Tag {name: "'''+tag_name+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(t)'''
+        graph.run(relation_wtag_quary)
+
+    
+
+    #converting the tabled result to dataframe to extract the reccommendation name from it
+    result_pd = pd.DataFrame(relation_result.to_data_frame())
+
+    #make condition in case tag not added sucessfuly return the create recommendation process failed
+    if result_pd.empty:
+        result_fi = {'tag':'create recommendation process failed'}
+    else:
+        result_fi = {'tags':list(result_pd['s.name'])[0]+' recommendation added sucessfully and attach to '+list(result_pd['d.name'])[0]+' domain and required tags sucessfully'}
+
+    return result_fi
+
+
+#api for read required suggestion
+class read_rec(BaseModel):
+    rec:str
+    
+
+@app.post('/admin_read_rec')
+async def read_rec_fun(item:read_rec):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    rec_name = item.rec
+   
+    #build quary body that read the required tag
+    quary = '''MATCH (s:Suggestion {name: "'''+rec_name+'''"}) <-[:IS_LINKED_WITH]-> (d:Domain) MATCH (s:Suggestion {name: "'''+rec_name+'''"}) <-[:IS_LINKED_WITH]-> (t:Tag) RETURN s,d,t'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the tag data from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case tag not read sucessfuly return the read tag process failed
+    if result_pd.empty:
+        result_fi = {'tag':'read recommendation process failed'}
+    else:
+        result_fi = {'suggestion':result_pd['s'][0],'tag':result_pd['t'],'domain':result_pd['d'][0]}
+
+    return result_fi
+
+#api for update required suggestion
+class update_rec(BaseModel):
+    rec_old_name:str
+    rec_new_name:str
+    rec_new_dis:str
+    rec_new_key:str
+    rec_new_title:str
+    new_related_domain:str
+    tag:list[constr(max_length=255)]
+
+@app.post('/admin_update_rec')
+async def update_rec_fun(item:update_rec):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    rec_old_name = item.rec_old_name
+    rec_new_name = item.rec_new_name
+    rec_new_dis = item.rec_new_dis
+    rec_new_key = item.rec_new_key
+    rec_new_title = item.rec_new_title
+    new_related_domain = item.new_related_domain
+    tag_names = item.tag
+   
+    #build quary body that update the tag properties and it's relation
+    quary = '''MATCH (s:Suggestion {name: "'''+rec_old_name+'''"}) SET s.name = "'''+rec_new_name+'''" , s.description = "'''+rec_new_dis+'''" , s.keyword = "'''+rec_new_key+'''" , s.title = "'''+rec_new_title+'''" '''
+    graph.run(quary)
+    
+    erase_old_relations_quary = '''MATCH (s:Suggestion {name: "'''+rec_new_name+'''"}) - [r1:IS_LINKED_WITH] -> (d:Domain) MATCH (s:Suggestion {name: "'''+rec_new_name+'''"}) <-[r2:IS_LINKED_WITH]-> (t:Tag) DELETE r1,r2'''
+    graph.run(erase_old_relations_quary)
+    
+    relation_wdomain_quary = '''MATCH (s:Suggestion {name: "'''+rec_new_name+'''"}) MATCH (d:Domain {name: "'''+new_related_domain+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(d) RETURN s.name,d.name'''
+    result = graph.run(relation_wdomain_quary)
+
+    for tag_name in tag_names:
+        relation_wtag_quary = '''MATCH (s:Suggestion {name: "'''+rec_new_name+'''"}) MATCH (t:Tag {name: "'''+tag_name+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(t)'''
+        graph.run(relation_wtag_quary)
+    
+    
+    #converting the tabled result to dataframe to extract the tag name from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case suggestion not updated sucessfuly return the update suggestion process failed
+    if result_pd.empty:
+        result_fi = {'rec':'update suggestion process failed'}
+    else:
+        result_fi = {'recs':list(result_pd['s.name'])[0]+' tag updated sucessfully and attach to '+list(result_pd['d.name'])[0]+' domain and other required tags sucessfully'}
+
+    return result_fi
+
+#api for delete required suggestion
+class delete_rec(BaseModel):
+    rec:str
+
+@app.post('/admin_delete_rec')
+async def delete_rec_fun(item:delete_rec):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    rec_name = item.rec
+
+    #build quary body detach and delete the required tag
+    quary = '''MATCH (s:Suggestion {name: "'''+rec_name+'''"}) DETACH DELETE s'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the tag name from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case tag not deleted sucessfuly return the delete tag process failed (result must be empty)
+    if result_pd.empty:
+        result_fi = {'recs':'Required suggestion deleted sucessfully'}
+    else:
+        result_fi = {'recs':'delete suggestion process failed'}
+
+    return result_fi
+
+
+#api to create multiple suggestions in one time
+class multi_rec(BaseModel):
+    recs:list[list[constr(max_length=255)]]
+    #the connected tags in list of list with same order of created suggestions in recs
+    connected_tags:list[list[constr(max_length=255)]]
+
+@app.post('/admin_create_multi_recs')
+async def create_multi_rec_fun(item:multi_rec):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    recs = item.recs
+    connected_tags = item.connected_tags
+
+    
+    #build quary body that return all required reccommendations
+    count = 0
+    for rec in recs:
+        rec_merging_quary = '''MERGE (s:Suggestion {name: "'''+rec[0]+'''",description:"'''+rec[1]+'''",keyword:"'''+rec[2]+'''",title:"'''+rec[3]+'''"})'''
+        graph.run(rec_merging_quary)
+        
+        relation_wdomain_quary = '''MATCH (s:Suggestion {name: "'''+rec[0]+'''"}) MATCH (d:Domain {name: "'''+rec[4]+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(d) RETURN s.name,d.name'''
+        
+        result = graph.run(relation_wdomain_quary)
+
+        for tag_name in connected_tags[count]:
+            relation_wtag_quary = '''MATCH (s:Suggestion {name: "'''+rec[0]+'''"}) MATCH (t:Tag {name: "'''+tag_name+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(t)'''
+            graph.run(relation_wtag_quary)
+        count +=1
+    
+
+    #converting the tabled result to dataframe to extract the reccommendation name from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case the multi recommendation not added sucessfuly return the create recommendation process failed
+    if result_pd.empty:
+        result_fi = {'rec':'create recommendation process failed'}
+    else:
+        result_fi = {'recs':list(result_pd['s.name'])[0]+' recommendation added sucessfully' }
     return result_fi
