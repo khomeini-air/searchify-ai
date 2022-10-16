@@ -365,6 +365,7 @@ class new_rec(BaseModel):
     rec:str
     rec_dis:str
     rec_key:str
+    rec_sh_count:str
     rec_title:str
     domain:str
     tag:list[constr(max_length=255)]
@@ -377,12 +378,13 @@ async def create_rec_fun(item:new_rec):
     rec_name = item.rec
     rec_dis = item.rec_dis
     rec_key = item.rec_key
+    rec_sh_count = item.rec_sh_count
     rec_title = item.rec_title
     domain_name = item.domain
     tag_names = item.tag
     
     #build quary body that return required recommendation
-    rec_merging_quary = '''MERGE (s:Suggestion {name: "'''+rec_name+'''",description:"'''+rec_dis+'''",keyword:"'''+rec_key+'''",title:"'''+rec_title+'''"})'''
+    rec_merging_quary = '''MERGE (s:Suggestion {name: "'''+rec_name+'''",description:"'''+rec_dis+'''",keyword:"'''+rec_key+'''",sh_count:"'''+rec_sh_count+'''",title:"'''+rec_title+'''"})'''
     relation_wdomain_quary = '''MATCH (s:Suggestion {name: "'''+rec_name+'''"}) MATCH (d:Domain {name: "'''+domain_name+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(d) RETURN s.name,d.name'''
     graph.run(rec_merging_quary)
     relation_result = graph.run(relation_wdomain_quary)
@@ -437,6 +439,7 @@ class update_rec(BaseModel):
     rec_new_name:str
     rec_new_dis:str
     rec_new_key:str
+    rec_new_sh_count:str
     rec_new_title:str
     new_related_domain:str
     tag:list[constr(max_length=255)]
@@ -450,12 +453,13 @@ async def update_rec_fun(item:update_rec):
     rec_new_name = item.rec_new_name
     rec_new_dis = item.rec_new_dis
     rec_new_key = item.rec_new_key
+    rec_new_sh_count = item.rec_new_sh_count
     rec_new_title = item.rec_new_title
     new_related_domain = item.new_related_domain
     tag_names = item.tag
    
     #build quary body that update the tag properties and it's relation
-    quary = '''MATCH (s:Suggestion {name: "'''+rec_old_name+'''"}) SET s.name = "'''+rec_new_name+'''" , s.description = "'''+rec_new_dis+'''" , s.keyword = "'''+rec_new_key+'''" , s.title = "'''+rec_new_title+'''" '''
+    quary = '''MATCH (s:Suggestion {name: "'''+rec_old_name+'''"}) SET s.name = "'''+rec_new_name+'''" , s.description = "'''+rec_new_dis+'''" , s.keyword = "'''+rec_new_key+'''" ,s.sh_count = "'''+rec_new_sh_count+'''", s.title = "'''+rec_new_title+'''" '''
     graph.run(quary)
     
     erase_old_relations_quary = '''MATCH (s:Suggestion {name: "'''+rec_new_name+'''"}) - [r1:IS_LINKED_WITH] -> (d:Domain) MATCH (s:Suggestion {name: "'''+rec_new_name+'''"}) <-[r2:IS_LINKED_WITH]-> (t:Tag) DELETE r1,r2'''
@@ -506,7 +510,7 @@ async def delete_rec_fun(item:delete_rec):
 
     return result_fi
 
-
+# Admin apis : Use case 3
 #api to create multiple suggestions in one time
 class multi_rec(BaseModel):
     recs:list[list[constr(max_length=255)]]
@@ -525,10 +529,10 @@ async def create_multi_rec_fun(item:multi_rec):
     #build quary body that return all required reccommendations
     count = 0
     for rec in recs:
-        rec_merging_quary = '''MERGE (s:Suggestion {name: "'''+rec[0]+'''",description:"'''+rec[1]+'''",keyword:"'''+rec[2]+'''",title:"'''+rec[3]+'''"})'''
+        rec_merging_quary = '''MERGE (s:Suggestion {name: "'''+rec[0]+'''",description:"'''+rec[1]+'''",keyword:"'''+rec[2]+'''",sh_count:"'''+rec[3]+'''",title:"'''+rec[4]+'''"})'''
         graph.run(rec_merging_quary)
         
-        relation_wdomain_quary = '''MATCH (s:Suggestion {name: "'''+rec[0]+'''"}) MATCH (d:Domain {name: "'''+rec[4]+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(d) RETURN s.name,d.name'''
+        relation_wdomain_quary = '''MATCH (s:Suggestion {name: "'''+rec[0]+'''"}) MATCH (d:Domain {name: "'''+rec[5]+'''"}) MERGE (s)- [:IS_LINKED_WITH] ->(d) RETURN s.name,d.name'''
         
         result = graph.run(relation_wdomain_quary)
 
@@ -547,3 +551,104 @@ async def create_multi_rec_fun(item:multi_rec):
     else:
         result_fi = {'recs':list(result_pd['s.name'])[0]+' recommendation added sucessfully' }
     return result_fi
+
+# Admin apis : Use case 4
+#Api to update the sh_count when user search about this suggestion
+class update_rec_sh_count(BaseModel):
+    rec:str
+    
+
+@app.post('/increasing_rec_searching_count')
+async def increase_sh_count_fun(item:update_rec_sh_count):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    rec_name = item.rec
+   
+    #build quary body that read the required tag
+    quary = '''MATCH (s:Suggestion {name: "'''+rec_name+'''"})  RETURN s.sh_count'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the recommendation sh_count from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #reading the current sh_count and increaing 1 when used/searched by the user
+    count = int(result_pd['s.sh_count'][0])
+    count += 1
+    quary = '''MATCH (s:Suggestion {name: "'''+rec_name+'''"}) SET s.sh_count = "'''+str(count)+'''"  RETURN s.name,s.sh_count'''
+    result = graph.run(quary)
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case tag not update sucessfuly return the update sh_count process failed
+    if result_pd.empty:
+        result_fi = {'rec':'updating the sh_count for this suggestion failed'}
+    else:
+        result_fi = {'rec':'the sh_count for suggestion '+result_pd['s.name'][0]+' is increased to be '+result_pd['s.sh_count'][0]}
+
+    return result_fi
+
+#Api to track wich suggestions are most searched by user
+class read_top_rec(BaseModel):
+    n_sugg:str
+
+@app.post('/get_top_n_searched_suggestions')
+async def get_top_searched_recs(item:read_top_rec):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    n_sugg = item.n_sugg
+   
+    #build quary body that read the required tag
+    quary = '''MATCH (n:Suggestion) WITH n,toInteger(n.sh_count) AS ser_count ORDER BY ser_count DESC RETURN n,ser_count LIMIT '''+ n_sugg 
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the recommendation sh_count from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    #make condition in case tag not update sucessfuly return the update sh_count process failed
+    if result_pd.empty:
+        result_fi = {'rec':'reading the sh_count for this suggestion failed'}
+    else:
+        x=0
+        result_fi = {}
+        for index,sug in result_pd.iterrows():
+            result_fi['suggestion '+str(x)]=sug['n']
+            result_fi['seggestion '+str(x)+' searched count']=sug['ser_count']
+            x+=1
+        # result_fi = {'suggestion':result_pd['n'],'tag':result_pd['t'],'domain':result_pd['d'][0]}
+
+    return result_fi
+
+#Use case 5 : Api to get the data frame for suggestions
+# api to export the neo4j data to .csv file? as below
+# - each row will consist of
+# + suggestion detail ( id , name, title, keywords, description)
+# + domain ( name or id)
+# + list of tags
+
+
+@app.get('/get_suggestions_csv')
+async def recs_csv():
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    # rec_name = item.rec
+   
+    #build quary body that read the required tag
+    quary = '''MATCH (sugg:Suggestion) <-[:IS_LINKED_WITH]-> (domain:Domain) MATCH (sugg:Suggestion) <-[:IS_LINKED_WITH]-> (tag:Tag) 
+            WITH sugg,domain, collect(tag.name) as tag_list
+            RETURN ID(sugg),sugg.name,sugg.title,sugg.keywords,sugg.description,domain.name,tag_list'''
+    result = graph.run(quary)
+
+    #converting the tabled result to dataframe to extract the tag data from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+    csv_data = result_pd.to_csv()
+
+    #make condition in case tag not read sucessfuly return the read tag process failed
+    if result_pd.empty:
+        result_fi = {'tag':'read recommendation process failed'}
+    else:
+        result_fi = {'suggestions':csv_data}
+
+    return result_fi
+
