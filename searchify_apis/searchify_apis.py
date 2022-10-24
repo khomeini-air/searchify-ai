@@ -221,7 +221,7 @@ async def delete_domain_fun(item:delete_domain):
     domain_name = item.domain
 
     #build quary body that return all domains
-    quary = '''MATCH (n:Domain {name: "'''+domain_name+'''"}) DELETE n'''
+    quary = '''MATCH (n:Domain {name: "'''+domain_name+'''"}) DETACH DELETE n'''
     result = graph.run(quary)
 
     #converting the tabled result to dataframe to extract the domain names from it
