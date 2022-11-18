@@ -3,7 +3,12 @@ from tokenize import String
 from py2neo import Graph
 from fastapi import FastAPI
 from pydantic import BaseModel,constr
+import spacy
 import pandas as pd
+
+from sklearn.metrics.pairwise import cosine_similarity, cosine_distances
+import numpy as np
+from tqdm.auto import tqdm
 
 app = FastAPI()
 
@@ -652,3 +657,191 @@ async def recs_csv():
 
     return result_fi
 
+
+##############---NLP_use_cases---##################
+#senario1
+#when user not inserting any domain or tag
+class nlp_sug_s1(BaseModel):
+    sug_dis:str
+   
+
+@app.post('/nlp_no_tag_domain')
+async def recommendations(item:nlp_sug_s1):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    #getting the domain and tags from item as it sent as json object
+    # domain = item.domain
+    # tags = item.tags
+    sug = item.sug_dis
+    print(sug)
+    #build quary body that contain the recommendation algorithm(content based recommendation algorithm) by adding domain and tags
+    quary = '''
+    MATCH (sug:Suggestion) RETURN sug.description
+    '''
+
+    #run the quary and getiing the results
+    result = graph.run(quary)
+    
+    #converting the tabled result to dataframe to extract the suggestions from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    sug_only_pd = result_pd[result_pd['sug.description'] != 'null']
+    sug_only_pd = sug_only_pd.reset_index(drop=True)
+
+    sug_only_li = list(sug_only_pd['sug.description'])
+
+    nlp = spacy.load('en_core_web_md')
+    x_test = [sug]
+    x_train_e = np.zeros((len(sug_only_li), 300))
+    x_test_e = np.zeros((len(x_test), 300))
+
+    for i, doc in tqdm(enumerate(nlp.pipe(sug_only_li)), total=len(sug_only_li)):
+        x_train_e[i, :] = doc.vector
+
+    for i, doc in tqdm(enumerate(nlp.pipe(x_test)), total=len([x_test])):
+        x_test_e[i, :] = doc.vector
+
+    
+    distances = cosine_similarity(x_test_e.reshape(1, -1), x_train_e).flatten()
+    indices = np.argsort(distances)[::-1]
+
+    result_pd = pd.DataFrame([sug_only_li[indices[0]]])
+    #make condition in case there is no suggestions not send error but just send there is no suggestions
+    if result_pd.empty:
+        result_fi = {'suggestion':'No suggestions to compare with'}
+    else:
+        result_fi = {'suggestions':result_pd[0][0]}
+
+    return result_fi
+
+#senario2
+#when user inserting domain but not inserting tag
+
+class nlp_sug_s2(BaseModel):
+    sug_dis:str
+    nlp_domain:str
+
+@app.post('/nlp_no_tag')
+async def recommendations(item:nlp_sug_s2):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    #getting the domain and tags from item as it sent as json object
+ 
+    sug = item.sug_dis
+    domain = item.nlp_domain
+    print(sug)
+    #build quary body that contain the recommendation algorithm(content based recommendation algorithm) by adding domain and tags
+    quary = '''MATCH (domain:Domain)<-[:IS_LINKED_WITH]->(sug:Suggestion)
+    WHERE domain.name CONTAINS "'''+domain+'''"
+    WITH sug,COUNT(sug) AS suggestions
+    ORDER BY suggestions DESC
+    RETURN DISTINCT sug.description'''
+
+    #run the quary and getiing the results
+    result = graph.run(quary)
+    
+    #converting the tabled result to dataframe to extract the suggestions from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    sug_only_pd = result_pd[result_pd['sug.description'] != 'null']
+    sug_only_pd = sug_only_pd.reset_index(drop=True)
+
+    sug_only_li = list(sug_only_pd['sug.description'])
+
+    nlp = spacy.load('en_core_web_md')
+    x_test = [sug]
+    x_train_e = np.zeros((len(sug_only_li), 300))
+    x_test_e = np.zeros((len(x_test), 300))
+
+    for i, doc in tqdm(enumerate(nlp.pipe(sug_only_li)), total=len(sug_only_li)):
+        x_train_e[i, :] = doc.vector
+
+    for i, doc in tqdm(enumerate(nlp.pipe(x_test)), total=len([x_test])):
+        x_test_e[i, :] = doc.vector
+
+    
+    distances = cosine_similarity(x_test_e.reshape(1, -1), x_train_e).flatten()
+    indices = np.argsort(distances)[::-1]
+
+    result_pd = pd.DataFrame([sug_only_li[indices[0]]])
+    #make condition in case there is no suggestions not send error but just send there is no suggestions
+    if result_pd.empty:
+        result_fi = {'suggestion':'No suggestions to compare with'}
+    else:
+        result_fi = {'suggestions':result_pd[0][0]}
+
+    return result_fi
+
+#senario3
+#when user inserting domain and inserting tag
+
+class nlp_sug_s3(BaseModel):
+    sug_dis:str
+    nlp_domain:str
+    nlp_tags: list[constr(max_length=255)]
+
+@app.post('/nlp_tag_domain')
+async def recommendations(item:nlp_sug_s3):
+    #authorization to connect with neo4j graph database
+    graph = Graph('neo4j+s://ed887860.databases.neo4j.io:7687', auth=('neo4j','yulO-mLLrt72cJ39FI12Lo-Lr6wtv6qx2oIzUNDl5Zo'))
+
+    #getting the domain and tags from item as it sent as json object
+ 
+    sug = item.sug_dis
+    domain = item.nlp_domain
+    tags = item.nlp_tags
+    
+    #build quary body that contain the recommendation algorithm(content based recommendation algorithm) by adding domain and tags
+    quary = '''
+    MATCH (domain:Domain{name:\''''+domain+'''\'})<-[:IS_LINKED_WITH]->(tag:Tag)<-[:IS_LINKED_WITH]->(sug:Suggestion)
+    WITH sug,COUNT(sug) AS suggestions
+    ORDER BY suggestions DESC
+    RETURN DISTINCT sug.description
+    '''
+    tag = tags[0]
+    tag_qu = ' WHERE tag.name CONTAINS "'+ tag +'"'
+    substr = "WITH sug"
+    idx = quary.index(substr)
+    quary = quary[:idx] + tag_qu + quary[idx:]
+    for tag in tags[1:]:
+        tag_qu = ' OR tag.name CONTAINS "'+ tag+'"'
+        substr = "WITH sug"
+        idx = quary.index(substr)
+        quary = quary[:idx] + tag_qu + quary[idx:]
+
+    #run the quary and getiing the results
+    result = graph.run(quary)
+    
+    #converting the tabled result to dataframe to extract the suggestions from it
+    result_pd = pd.DataFrame(result.to_data_frame())
+
+    sug_only_pd = result_pd[result_pd['sug.description'] != 'null']
+    sug_only_pd = sug_only_pd.reset_index(drop=True)
+
+    sug_only_li = list(sug_only_pd['sug.description'])
+
+    nlp = spacy.load('en_core_web_md')
+    x_test = [sug]
+    x_train_e = np.zeros((len(sug_only_li), 300))
+    x_test_e = np.zeros((len(x_test), 300))
+
+    for i, doc in tqdm(enumerate(nlp.pipe(sug_only_li)), total=len(sug_only_li)):
+        x_train_e[i, :] = doc.vector
+
+    for i, doc in tqdm(enumerate(nlp.pipe(x_test)), total=len([x_test])):
+        x_test_e[i, :] = doc.vector
+
+    
+    distances = cosine_similarity(x_test_e.reshape(1, -1), x_train_e).flatten()
+    indices = np.argsort(distances)[::-1]
+
+    result_pd = pd.DataFrame([sug_only_li[indices[0]]])
+    #make condition in case there is no suggestions not send error but just send there is no suggestions
+    if result_pd.empty:
+        result_fi = {'suggestion':'No suggestions to compare with'}
+    else:
+        result_fi = {'suggestions':result_pd[0][0]}
+
+    return result_fi
