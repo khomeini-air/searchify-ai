@@ -10,6 +10,8 @@ from sklearn.metrics.pairwise import cosine_similarity, cosine_distances
 import numpy as np
 from tqdm.auto import tqdm
 
+import openai
+
 app = FastAPI()
 
 #use case 1
@@ -843,5 +845,71 @@ async def recommendations(item:nlp_sug_s3):
         result_fi = {'suggestion':'No suggestions to compare with'}
     else:
         result_fi = {'suggestions':result_pd[0][0]}
+
+    return result_fi
+
+#API for GPT-3 model from openAI platform to generate paragraph about required topic
+class openAI_rec(BaseModel):
+    openAI_domain:str
+    
+
+@app.post('/openAI_sugg')
+async def recommendations(item:openAI_rec):
+    #authorization to connect with open AI API
+    openai.api_key = "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"
+
+    #getting the suggestion topic from user
+    sug_domain = item.openAI_domain
+
+    #write the openAPi function that return required paragraph
+    suggestion = openai.Completion.create(
+    model="text-davinci-003",
+    prompt="write paragraph about"+ sug_domain,
+    max_tokens=2048,
+    temperature=0
+    )
+
+    b_text = suggestion.to_dict()['choices'][0]['text']
+    
+    #make condition in case there is no suggestions not send error but just send there is a problem with openAI API
+    if b_text == None or b_text == '':
+        result_fi = {'suggestion':'There is a problem in openAI API'}
+    else:
+        result_fi = {'suggestions':b_text}
+
+    return result_fi
+
+# More general API for GPT-3 model from openAI platform to generate any type of written objects like essay,tagline,subtitles,brainStorm..etc about required topic with specific number of tokens
+class openAI_ge(BaseModel):
+    written_type:str
+    openAI_domain:str
+    #please note the maxmium number of tokens can be sent is 2048 as the model can not return more than that
+    openAI_maxTokens:int
+
+@app.post('/openAI_gen')
+async def recommendations(item:openAI_ge):
+    #authorization to connect with open AI API
+    openai.api_key = "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"
+
+    #getting the suggestion topic from user
+    written_type = item.written_type
+    sug_domain = item.openAI_domain
+    num_tokens = item.openAI_maxTokens
+
+    #write the openAPi function that return required object with the required number of tokens
+    suggestion = openai.Completion.create(
+    model="text-davinci-003",
+    prompt="write "+ written_type +" about"+ sug_domain,
+    max_tokens=num_tokens,
+    temperature=0
+    )
+
+    b_text = suggestion.to_dict()['choices'][0]['text']
+    
+    #make condition in case there is no suggestions not send error but just send there is a problem with openAI API
+    if b_text == None or b_text == '':
+        result_fi = {'suggestion':'There is a problem in openAI API'}
+    else:
+        result_fi = {'suggestions':b_text}
 
     return result_fi
